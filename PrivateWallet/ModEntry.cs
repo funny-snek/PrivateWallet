@@ -16,9 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-
-
-
+using Harmony;
 
 namespace PrivateWallet
 {
@@ -33,7 +31,13 @@ namespace PrivateWallet
         public static void Postfix(ref int __result)
         {
             //if game1.isclient || mastergame
-            __result = ModEntry.localMoney;  // this variable is being broadcast and shared between all clients and host, change it one place updates everywhere
+            if (!WalletData.PlayerWallets.ContainsKey(Game1.player.uniqueMultiplayerID))
+            {
+                //need to do below but cant access a non-static dicitionary
+                //WalletData.PlayerWallets[Game1.player.UniqueMultiplayerID] = WalletData.PlayerWalletsJSON[Game1.player.UniqueMultiplayerID]
+                WalletData.PlayerWallets[Game1.player.UniqueMultiplayerID] = 501;
+            }
+            __result = WalletData.PlayerWallets[Game1.player.UniqueMultiplayerID];
         }
     }
     class SetMoney : Patch.Patch
@@ -43,7 +47,7 @@ namespace PrivateWallet
         public static bool Prefix(int value, Farmer __instance)
         {
             //if game1.isclient || mastergame
-            ModEntry.localMoney = value;
+            WalletData.PlayerWallets[Game1.player.UniqueMultiplayerID] = value;
             return false;
         }
     }
@@ -93,7 +97,9 @@ namespace PrivateWallet
     }*/
     public class WalletData
     {
-        public Dictionary<long, int> PlayerWallets { get; set; } = new Dictionary<long, int>();
+        public static Dictionary<long, int> PlayerWallets { get; set; } = new Dictionary<long, int>();
+        public Dictionary<long, int> PlayerWalletsJSON { get; set; } = new Dictionary<long, int>();
+        public Dictionary<long, int> PreviousDayBackupJSON { get; set; } = new Dictionary<long, int>();
     }
 
     /// <summary>
@@ -101,9 +107,12 @@ namespace PrivateWallet
     /// </summary>
     public class ModEntry : Mod
     {
-        public static int localMoney = 501;
-        public int moneyChecker = -5; // to compare to see if money amount in local money has changed
-        private bool hasHostBeenAskedForWalletYet = false;
+
+        public Dictionary<long, int> PlayerWalletsChecker { get; set; } = new Dictionary<long, int>();
+        public static WalletData data;
+
+        private bool initialWrite = false;
+        private int hourCounter = 600;
         public readonly static List<string> GetWalletMessages = new List<string>();
         public readonly static List<string> DepositMessages = new List<string>();
         public readonly static List<string> WithdrawalMessages = new List<string>();
@@ -112,135 +121,42 @@ namespace PrivateWallet
         {
             MultiplayerEvents.BeforeMainSync += Sync; //used bc only thing that gets throug save window
             Patch.Patch.PatchAll("PrivateWallet.PrivateWallet");//harmony patch
+            
         }
-        
+
         private void Sync(object sender, EventArgs e)
         {
             if (Context.IsWorldReady)
             {
-                
-                if (hasHostBeenAskedForWalletYet == true)
+                if (initialWrite == false)
                 {
-                    //send deposit to wallet
-                    if (moneyChecker != localMoney)
+                    if (Game1.IsMasterGame)
                     {
-                        
-                        moneyChecker = localMoney;
-                        if (!Game1.IsClient)
+                        data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
+                        foreach (KeyValuePair<long, int> x in WalletData.PlayerWallets)
                         {
-                            var data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
-                            data.PlayerWallets[Game1.player.UniqueMultiplayerID] = localMoney;
-                            this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
+                            data.PlayerWalletsJSON[x.Key] = x.Value;
                         }
-                        if (Game1.IsClient)
-                        {
-                            string myDepositMessage = $"!DEPOSIT{Game1.player.UniqueMultiplayerID}:{localMoney}";
-                            Game1.client.sendMessage((byte)18, myDepositMessage);
-                            
-                        }
+                        this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
+                        initialWrite = true;
 
                     }
                 }
-                //deposit client messages into wallets
-                if (!Game1.IsClient)
+                if (Game1.timeOfDay == hourCounter)
                 {
-                    if (DepositMessages.Count() > 0)
+                    var data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
+                    foreach (KeyValuePair<long, int> x in WalletData.PlayerWallets)
                     {
-                        foreach (string message in DepositMessages)
-                        {
-                            var data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
-                            long playerIDforDeposit = Convert.ToInt64(message.Split(new char[] { ':' })[0]);
-                            int money = Convert.ToInt32(message.Split(new char[] { ':' })[1]);
-                            data.PlayerWallets[playerIDforDeposit] = money;
-                            this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
-                            
-                        }
-                        DepositMessages.Clear();
+                        data.PlayerWalletsJSON[x.Key] = x.Value;
                     }
+                    this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
+                    hourCounter += 100;
                 }
 
+                //write some more code to handle if the game crashes before end of day so players don't keep their money + get their items back
 
-                //get wallet ammount
-                if (hasHostBeenAskedForWalletYet == false)
-                {
-                    if (!Game1.IsClient)
-                    {
-                        var data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
-                        if (!data.PlayerWallets.Keys.Contains(Game1.player.UniqueMultiplayerID))
-                        {
-                            data.PlayerWallets[Game1.player.UniqueMultiplayerID] = 501;
-                            this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
-                            return;
-                        }
-                        localMoney = data.PlayerWallets[Game1.player.UniqueMultiplayerID];
-                        hasHostBeenAskedForWalletYet = true;
-                    }
-                    if (Game1.IsClient)
-                    {
-                        string myGetWalletMessage = $"!GETWALLET{Game1.player.UniqueMultiplayerID}";
-                        Game1.client.sendMessage((byte)18, myGetWalletMessage);
-                        this.Monitor.Log($"{localMoney}");
-                    }
-                }
 
-                //send wallet message to client 
-                if (!Game1.IsClient)
-                {
-                    if (GetWalletMessages.Count() > 0)
-                    {
-                        foreach (string message in GetWalletMessages)
-                        {
-                            var data = this.Helper.ReadJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json") ?? new WalletData();
-                            long playerIDforWithdrawal = Convert.ToInt64(message);
-                            if (!data.PlayerWallets.Keys.Contains(playerIDforWithdrawal))
-                            {
-                                data.PlayerWallets[playerIDforWithdrawal] = 501;
-                                this.Helper.WriteJsonFile<WalletData>($"data/{Constants.SaveFolderName}.json", data);
-                                return;
-                            }
-                            int playerAmountWithdrawal = data.PlayerWallets[playerIDforWithdrawal];
-                            string sendWalletMessage = $"!SENDWALLET{playerIDforWithdrawal}:{playerAmountWithdrawal}";
-                            OutgoingMessage myServerMessage = new OutgoingMessage((byte)18, Game1.player.UniqueMultiplayerID, sendWalletMessage);
-                            Game1.server.sendMessage(Game1.player.UniqueMultiplayerID, myServerMessage); 
-                            //this message isn't going through
-                            
-                        }
-                        GetWalletMessages.Clear();
-                    }
-                }
-
-                //add received wallet amount to local money
-                if (!Game1.IsClient)
-                {
-                    if (WithdrawalMessages.Count > 0)
-                    {
-                        foreach (string message in WithdrawalMessages)
-                        {
-                            long playerIDforWithdrawal = Convert.ToInt64(message.Split(new char[] { ':' })[0]);
-                            if (playerIDforWithdrawal == Game1.player.UniqueMultiplayerID)
-                            {
-                                localMoney = Convert.ToInt32(message.Split(new char[] { ':' })[1]);
-                                hasHostBeenAskedForWalletYet = true;
-                            }
-                            
-                        }
-                        WithdrawalMessages.Clear();
-                    }
-                }
-
-            }
-            if(Game1.activeClickableMenu is TitleMenu || Game1.activeClickableMenu is CoopMenu)
-            {
-                hasHostBeenAskedForWalletYet = false;
-                localMoney = 501;
-                moneyChecker = -5;
-                GetWalletMessages.Clear();
-                DepositMessages.Clear();
-                WithdrawalMessages.Clear();
-            }
-
-            if (Context.IsWorldReady)
-            {
+                //shipping bin fix
                 var lastItemShipped = (StardewValley.Object)Game1.getFarm().lastItemShipped;
                 if (lastItemShipped != null)
                 {
@@ -248,12 +164,9 @@ namespace PrivateWallet
                     Game1.getFarm().lastItemShipped = null;
                 }
 
+
             }
-            //set up backup dictionary at start of day, if day doesn't save load backup dictionary
         }
-
-
-         
-        
     }
+                
 }
