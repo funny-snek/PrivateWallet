@@ -17,8 +17,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 
-//notes
-//after all is done, figure out host money seperately
+
 
 
 namespace PrivateWallet
@@ -77,6 +76,7 @@ namespace PrivateWallet
             //Game1.client.sendMessage((byte) 18, myStringMessage)
         }
     }
+    // maybe patch this for server messages?
    /* class receiveChatMessage_Patcher : Patch.Patch
     {
         protected override PatchDescriptor GetPatchDescriptor() => new PatchDescriptor(typeof(Multiplayer), "receiveChatMessage");
@@ -101,7 +101,7 @@ namespace PrivateWallet
     /// </summary>
     public class ModEntry : Mod
     {
-        public static int localMoney = 501; //need to use different variable for each client so local money needs to be stored or rather pulled directly from teh dictionary
+        public static int localMoney = 501;
         public int moneyChecker = -5; // to compare to see if money amount in local money has changed
         private bool hasHostBeenAskedForWalletYet = false;
         public readonly static List<string> GetWalletMessages = new List<string>();
