@@ -1,0 +1,10 @@
+{
+  "Name": "PrivateWallet",
+  "Author": "funnsnek",
+  "Version": "1.0.0",
+  "Description": "A private wallet for multiplayer",
+  "UniqueID": "funnysnek.PrivateWallet",
+  "EntryDll": "PrivateWallet.dll",
+  "MinimumApiVersion": "2.0",
+  "UpdateKeys": []
+}
